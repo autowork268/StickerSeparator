@@ -1,0 +1,6 @@
+{
+  "name": "Sticker Separator",
+  "description": "Auto-segments uploaded sticker sheets into individual transparent stickers.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
