@@ -160,16 +160,15 @@ export default function App() {
       ctx.putImageData(imgData, 0, 0);
 
       // 2. Find Objects (Stickers)
-      const stickersData: string[] = [];
       const objectVisited = new Uint8Array(width * height);
+      stackPtr = 0;
+      
+      let rawObjects: { minX: number, maxX: number, minY: number, maxY: number }[] = [];
 
-      // Re-use stack arrays
       for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
           const idx = (y * width + x) * 4;
-          // Use > 10 instead of > 0 to ignore heavily blurred fringe
           if (data[idx + 3] > 10 && objectVisited[y * width + x] === 0) {
-            
             let minX = x, maxX = x, minY = y, maxY = y;
             stackPtr = 0;
             stackX[stackPtr] = x;
@@ -201,64 +200,94 @@ export default function App() {
                 }
               }
             }
-
-            const padding = 10;
-            const w = maxX - minX;
-            const h = maxY - minY;
-
-            // Filter out small noise
-            if (w > 50 && h > 50) {
-                const sMinX = Math.max(0, minX - padding);
-                const sMinY = Math.max(0, minY - padding);
-                const sMaxX = Math.min(width, maxX + padding);
-                const sMaxY = Math.min(height, maxY + padding);
-                const sW = sMaxX - sMinX;
-                const sH = sMaxY - sMinY;
-
-                // Create a temporary canvas for the raw sticker
-                const rawCanvas = document.createElement('canvas');
-                rawCanvas.width = sW;
-                rawCanvas.height = sH;
-                const rawCtx = rawCanvas.getContext('2d');
-                
-                if (rawCtx) {
-                    rawCtx.drawImage(canvas, sMinX, sMinY, sW, sH, 0, 0, sW, sH);
-
-                    // Create final canvas with padding for the thick white stroke
-                    const strokePad = 14;
-                    const finalCanvas = document.createElement('canvas');
-                    finalCanvas.width = sW + strokePad * 2;
-                    finalCanvas.height = sH + strokePad * 2;
-                    const fCtx = finalCanvas.getContext('2d');
-
-                    if (fCtx) {
-                        fCtx.imageSmoothingEnabled = true;
-                        
-                        // Set the Zalo/Messenger sticker thick white stroke
-                        const strokeThickness = 8;
-                        const points = 36;
-                        for (let i = 0; i < points; i++) {
-                            const angle = (i * 2 * Math.PI) / points;
-                            const dx = Math.cos(angle) * strokeThickness;
-                            const dy = Math.sin(angle) * strokeThickness;
-                            fCtx.drawImage(rawCanvas, strokePad + dx, strokePad + dy);
-                        }
-
-                        // Fill the entire blob with white
-                        fCtx.globalCompositeOperation = 'source-in';
-                        fCtx.fillStyle = '#ffffff';
-                        fCtx.fillRect(0, 0, finalCanvas.width, finalCanvas.height);
-
-                        // Draw the original anti-aliased image on top of the solid white outline
-                        fCtx.globalCompositeOperation = 'source-over';
-                        fCtx.drawImage(rawCanvas, strokePad, strokePad);
-
-                        stickersData.push(finalCanvas.toDataURL('image/png'));
-                    }
-                }
+            
+            // Filter out tiny noise
+            if (maxX - minX > 5 && maxY - minY > 5) {
+                rawObjects.push({ minX, maxX, minY, maxY });
             }
           }
         }
+      }
+
+      // Merge close objects (e.g. floating text with body)
+      const MERGE_DIST = 25;
+      let merged = true;
+      while (merged) {
+          merged = false;
+          for (let i = 0; i < rawObjects.length; i++) {
+              for (let j = i + 1; j < rawObjects.length; j++) {
+                  const b1 = rawObjects[i];
+                  const b2 = rawObjects[j];
+                  
+                  const xOverlap = b1.maxX + MERGE_DIST >= b2.minX && b2.maxX + MERGE_DIST >= b1.minX;
+                  const yOverlap = b1.maxY + MERGE_DIST >= b2.minY && b2.maxY + MERGE_DIST >= b1.minY;
+
+                  if (xOverlap && yOverlap) {
+                      b1.minX = Math.min(b1.minX, b2.minX);
+                      b1.maxX = Math.max(b1.maxX, b2.maxX);
+                      b1.minY = Math.min(b1.minY, b2.minY);
+                      b1.maxY = Math.max(b1.maxY, b2.maxY);
+                      rawObjects.splice(j, 1);
+                      merged = true;
+                      break;
+                  }
+              }
+              if (merged) break; // Re-evaluate after modification
+          }
+      }
+
+      const stickersData: string[] = [];
+      const padding = 10;
+      
+      for (const b of rawObjects) {
+          const w = b.maxX - b.minX;
+          const h = b.maxY - b.minY;
+          
+          if (w > 50 && h > 50) {
+              const sMinX = Math.max(0, b.minX - padding);
+              const sMinY = Math.max(0, b.minY - padding);
+              const sMaxX = Math.min(width, b.maxX + padding);
+              const sMaxY = Math.min(height, b.maxY + padding);
+              const sW = sMaxX - sMinX;
+              const sH = sMaxY - sMinY;
+
+              const rawCanvas = document.createElement('canvas');
+              rawCanvas.width = sW;
+              rawCanvas.height = sH;
+              const rawCtx = rawCanvas.getContext('2d');
+              
+              if (rawCtx) {
+                  rawCtx.drawImage(canvas, sMinX, sMinY, sW, sH, 0, 0, sW, sH);
+
+                  const strokePad = 14;
+                  const finalCanvas = document.createElement('canvas');
+                  finalCanvas.width = sW + strokePad * 2;
+                  finalCanvas.height = sH + strokePad * 2;
+                  const fCtx = finalCanvas.getContext('2d');
+
+                  if (fCtx) {
+                      fCtx.imageSmoothingEnabled = true;
+                      
+                      const strokeThickness = 8;
+                      const points = 36;
+                      for (let i = 0; i < points; i++) {
+                          const angle = (i * 2 * Math.PI) / points;
+                          const dx = Math.cos(angle) * strokeThickness;
+                          const dy = Math.sin(angle) * strokeThickness;
+                          fCtx.drawImage(rawCanvas, strokePad + dx, strokePad + dy);
+                      }
+
+                      fCtx.globalCompositeOperation = 'source-in';
+                      fCtx.fillStyle = '#ffffff';
+                      fCtx.fillRect(0, 0, finalCanvas.width, finalCanvas.height);
+
+                      fCtx.globalCompositeOperation = 'source-over';
+                      fCtx.drawImage(rawCanvas, strokePad, strokePad);
+
+                      stickersData.push(finalCanvas.toDataURL('image/png'));
+                  }
+              }
+          }
       }
 
       setStickers(stickersData);
