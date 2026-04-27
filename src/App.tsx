@@ -63,7 +63,7 @@ export default function App() {
       const bgR = data[0];
       const bgG = data[1];
       const bgB = data[2];
-      const tolerance = 40; // color diff tolerance
+      const tolerance = 18; // Low tolerance to stop at drop shadows
 
       const colorMatch = (i: number) => {
         return Math.abs(data[i] - bgR) <= tolerance &&
@@ -159,91 +159,176 @@ export default function App() {
       // 1.7 Commit the transparent and softened pixels to the main canvas
       ctx.putImageData(imgData, 0, 0);
 
-      // 2. Find Objects (Stickers)
-      const objectVisited = new Uint8Array(width * height);
-      stackPtr = 0;
-      
-      let rawObjects: { minX: number, maxX: number, minY: number, maxY: number }[] = [];
-
-      for (let y = 0; y < height; y++) {
-        for (let x = 0; x < width; x++) {
-          const idx = (y * width + x) * 4;
-          if (data[idx + 3] > 10 && objectVisited[y * width + x] === 0) {
-            let minX = x, maxX = x, minY = y, maxY = y;
-            stackPtr = 0;
-            stackX[stackPtr] = x;
-            stackY[stackPtr] = y;
-            stackPtr++;
-            objectVisited[y * width + x] = 1;
-
-            while (stackPtr > 0) {
-              stackPtr--;
-              const cx = stackX[stackPtr];
-              const cy = stackY[stackPtr];
-
-              if (cx < minX) minX = cx;
-              if (cx > maxX) maxX = cx;
-              if (cy < minY) minY = cy;
-              if (cy > maxY) maxY = cy;
-
-              const neighbors = [[cx + 1, cy], [cx - 1, cy], [cx, cy + 1], [cx, cy - 1]];
-              for (const [nx, ny] of neighbors) {
-                if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
-                  const nIdxMap = ny * width + nx;
-                  const nIdxData = nIdxMap * 4;
-                  if (objectVisited[nIdxMap] === 0 && data[nIdxData + 3] > 10) {
-                    objectVisited[nIdxMap] = 1;
-                    stackX[stackPtr] = nx;
-                    stackY[stackPtr] = ny;
-                    stackPtr++;
-                  }
-                }
-              }
-            }
-            
-            // Filter out tiny noise
-            if (maxX - minX > 5 && maxY - minY > 5) {
-                rawObjects.push({ minX, maxX, minY, maxY });
-            }
-          }
-        }
+      // --- 2. MORPHOLOGICAL EROSION & WATERSHED ---
+      const M = new Uint8Array(width * height);
+      for (let i = 0; i < width * height; i++) {
+        if (data[i * 4 + 3] > 10) M[i] = 1;
       }
 
-      // Merge close objects (e.g. floating text with body)
-      const MERGE_DIST = 25;
-      let merged = true;
-      while (merged) {
-          merged = false;
-          for (let i = 0; i < rawObjects.length; i++) {
-              for (let j = i + 1; j < rawObjects.length; j++) {
-                  const b1 = rawObjects[i];
-                  const b2 = rawObjects[j];
-                  
-                  const xOverlap = b1.maxX + MERGE_DIST >= b2.minX && b2.maxX + MERGE_DIST >= b1.minX;
-                  const yOverlap = b1.maxY + MERGE_DIST >= b2.minY && b2.maxY + MERGE_DIST >= b1.minY;
-
-                  if (xOverlap && yOverlap) {
-                      b1.minX = Math.min(b1.minX, b2.minX);
-                      b1.maxX = Math.max(b1.maxX, b2.maxX);
-                      b1.minY = Math.min(b1.minY, b2.minY);
-                      b1.maxY = Math.max(b1.maxY, b2.maxY);
-                      rawObjects.splice(j, 1);
-                      merged = true;
-                      break;
+      const getCores = (R: number) => {
+          const E = new Uint8Array(width * height);
+          if (R === 0) {
+              for (let i = 0; i < width * height; i++) E[i] = M[i];
+          } else {
+              const E_horiz = new Uint8Array(width * height);
+              for (let y = 0; y < height; y++) {
+                  let sum = 0;
+                  for (let x = 0; x <= R && x < width; x++) sum += M[y * width + x];
+                  for (let x = 0; x < width; x++) {
+                     const minX = Math.max(0, x - R);
+                     const maxX = Math.min(width - 1, x + R);
+                     if (sum === maxX - minX + 1) E_horiz[y * width + x] = 1;
+                     
+                     if (x - R >= 0) sum -= M[y * width + (x - R)];
+                     if (x + R + 1 < width) sum += M[y * width + (x + R + 1)];
                   }
               }
-              if (merged) break; // Re-evaluate after modification
+
+              for (let x = 0; x < width; x++) {
+                  let sum = 0;
+                  for (let y = 0; y <= R && y < height; y++) sum += E_horiz[y * width + x];
+                  for (let y = 0; y < height; y++) {
+                     const minY = Math.max(0, y - R);
+                     const maxY = Math.min(height - 1, y + R);
+                     if (sum === maxY - minY + 1) E[y * width + x] = 1;
+                     
+                     if (y - R >= 0) sum -= E_horiz[(y - R) * width + x];
+                     if (y + R + 1 < height) sum += E_horiz[(y + R + 1) * width + x];
+                  }
+              }
+          }
+
+          const coreLabels = new Int32Array(width * height);
+          let currentLabel = 1;
+          const coreQueue = new Int32Array(width * height);
+          const activeCores = [];
+
+          for (let y = 0; y < height; y++) {
+              for (let x = 0; x < width; x++) {
+                  const idx = y * width + x;
+                  if (E[idx] === 1 && coreLabels[idx] === 0) {
+                      let qHead = 0, qTail = 0;
+                      coreQueue[qTail++] = idx;
+                      coreLabels[idx] = currentLabel;
+                      let count = 1;
+                      
+                      while (qHead < qTail) {
+                          const cIdx = coreQueue[qHead++];
+                          const cx = cIdx % width;
+                          const cy = Math.floor(cIdx / width);
+                          
+                          if (cx > 0 && E[cIdx - 1] === 1 && coreLabels[cIdx - 1] === 0) {
+                             coreLabels[cIdx - 1] = currentLabel;
+                             coreQueue[qTail++] = cIdx - 1;
+                             count++;
+                          }
+                          if (cx < width - 1 && E[cIdx + 1] === 1 && coreLabels[cIdx + 1] === 0) {
+                             coreLabels[cIdx + 1] = currentLabel;
+                             coreQueue[qTail++] = cIdx + 1;
+                             count++;
+                          }
+                          if (cy > 0 && E[cIdx - width] === 1 && coreLabels[cIdx - width] === 0) {
+                             coreLabels[cIdx - width] = currentLabel;
+                             coreQueue[qTail++] = cIdx - width;
+                             count++;
+                          }
+                          if (cy < height - 1 && E[cIdx + width] === 1 && coreLabels[cIdx + width] === 0) {
+                             coreLabels[cIdx + width] = currentLabel;
+                             coreQueue[qTail++] = cIdx + width;
+                             count++;
+                          }
+                      }
+                      
+                      if (count > 20) {
+                          activeCores.push(currentLabel);
+                          currentLabel++;
+                      } else {
+                          for(let i = 0; i < qTail; i++) coreLabels[coreQueue[i]] = 0;
+                      }
+                  }
+              }
+          }
+          return { coreLabels, activeCores };
+      };
+
+      let { coreLabels, activeCores } = getCores(15);
+      if (activeCores.length === 0) {
+          const res = getCores(8);
+          coreLabels = res.coreLabels;
+          activeCores = res.activeCores;
+      }
+      if (activeCores.length === 0) {
+          const res = getCores(0);
+          coreLabels = res.coreLabels;
+          activeCores = res.activeCores;
+      }
+
+      const finalLabels = new Int32Array(width * height);
+      const queue = new Int32Array(width * height);
+      let qHead = 0, qTail = 0;
+
+      for (let i = 0; i < width * height; i++) {
+          if (coreLabels[i] > 0) {
+              finalLabels[i] = coreLabels[i];
+              queue[qTail++] = i;
+          }
+      }
+
+      while (qHead < qTail) {
+          const idx = queue[qHead++];
+          const L = finalLabels[idx];
+          const x = idx % width;
+          const y = Math.floor(idx / width);
+          
+          if (x > 0 && finalLabels[idx - 1] === 0) {
+              finalLabels[idx - 1] = L;
+              queue[qTail++] = idx - 1;
+          }
+          if (x < width - 1 && finalLabels[idx + 1] === 0) {
+              finalLabels[idx + 1] = L;
+              queue[qTail++] = idx + 1;
+          }
+          if (y > 0 && finalLabels[idx - width] === 0) {
+              finalLabels[idx - width] = L;
+              queue[qTail++] = idx - width;
+          }
+          if (y < height - 1 && finalLabels[idx + width] === 0) {
+              finalLabels[idx + width] = L;
+              queue[qTail++] = idx + width;
+          }
+      }
+
+      const bounds = new Map<number, {minX: number, maxX: number, minY: number, maxY: number, pixels: number}>();
+      for (let y = 0; y < height; y++) {
+          for (let x = 0; x < width; x++) {
+              const idx = y * width + x;
+              if (M[idx] === 1) {
+                  const L = finalLabels[idx];
+                  if (L > 0) {
+                      let b = bounds.get(L);
+                      if (!b) {
+                          b = { minX: x, maxX: x, minY: y, maxY: y, pixels: 1 };
+                          bounds.set(L, b);
+                      } else {
+                          if (x < b.minX) b.minX = x;
+                          if (x > b.maxX) b.maxX = x;
+                          if (y < b.minY) b.minY = y;
+                          if (y > b.maxY) b.maxY = y;
+                          b.pixels++;
+                      }
+                  }
+              }
           }
       }
 
       const stickersData: string[] = [];
       const padding = 10;
       
-      for (const b of rawObjects) {
+      for (const [label, b] of bounds.entries()) {
           const w = b.maxX - b.minX;
           const h = b.maxY - b.minY;
           
-          if (w > 50 && h > 50) {
+          if (w > 40 && h > 40 && b.pixels > 300) {
               const sMinX = Math.max(0, b.minX - padding);
               const sMinY = Math.max(0, b.minY - padding);
               const sMaxX = Math.min(width, b.maxX + padding);
@@ -257,7 +342,27 @@ export default function App() {
               const rawCtx = rawCanvas.getContext('2d');
               
               if (rawCtx) {
-                  rawCtx.drawImage(canvas, sMinX, sMinY, sW, sH, 0, 0, sW, sH);
+                  const stickerImgData = rawCtx.createImageData(sW, sH);
+                  
+                  for (let sy = 0; sy < sH; sy++) {
+                      for (let sx = 0; sx < sW; sx++) {
+                          const oy = sMinY + sy;
+                          const ox = sMinX + sx;
+                          if (oy >= 0 && oy < height && ox >= 0 && ox < width) {
+                              const oIdx = oy * width + ox;
+                              const pLabel = finalLabels[oIdx];
+                              
+                              if (M[oIdx] === 1 && pLabel === label) {
+                                  const sIdx = (sy * sW + sx) * 4;
+                                  stickerImgData.data[sIdx] = data[oIdx * 4];
+                                  stickerImgData.data[sIdx + 1] = data[oIdx * 4 + 1];
+                                  stickerImgData.data[sIdx + 2] = data[oIdx * 4 + 2];
+                                  stickerImgData.data[sIdx + 3] = data[oIdx * 4 + 3];
+                              }
+                          }
+                      }
+                  }
+                  rawCtx.putImageData(stickerImgData, 0, 0);
 
                   const strokePad = 14;
                   const finalCanvas = document.createElement('canvas');
