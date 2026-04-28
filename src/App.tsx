@@ -21,14 +21,17 @@ export default function App() {
   const [hLines, setHLines] = useState<number[]>([0.5]);
   const [vLines, setVLines] = useState<number[]>([0.5]);
   const [draggingLine, setDraggingLine] = useState<{type: 'h'|'v', index: number} | null>(null);
+  const [autoGrid, setAutoGrid] = useState<{h: number[], v: number[]} | null>(null);
 
-  useEffect(() => {
-    setHLines(Array.from({ length: Math.max(1, manualRows) - 1 }, (_, i) => (i + 1) / manualRows));
-  }, [manualRows]);
+  const handleRowsChange = (val: number) => {
+      setManualRows(val);
+      setHLines(Array.from({ length: Math.max(1, val) - 1 }, (_, i) => (i + 1) / val));
+  };
 
-  useEffect(() => {
-    setVLines(Array.from({ length: Math.max(1, manualCols) - 1 }, (_, i) => (i + 1) / manualCols));
-  }, [manualCols]);
+  const handleColsChange = (val: number) => {
+      setManualCols(val);
+      setVLines(Array.from({ length: Math.max(1, val) - 1 }, (_, i) => (i + 1) / val));
+  };
 
   const handleManualMouseMove = useCallback((e: MouseEvent) => {
     if (!draggingLine || !imgRef.current) return;
@@ -217,6 +220,48 @@ export default function App() {
       const M = new Uint8Array(width * height);
       for (let i = 0; i < width * height; i++) {
         if (data[i * 4 + 3] > 10) M[i] = 1;
+      }
+
+      if (!manualConfig) {
+          const projX = new Float32Array(width);
+          const projY = new Float32Array(height);
+          for (let y = 0; y < height; y++) {
+            for (let x = 0; x < width; x++) {
+              if (M[y * width + x] === 1) {
+                projX[x]++;
+                projY[y]++;
+              }
+            }
+          }
+
+          const findGaps = (proj: Float32Array, len: number) => {
+            const max = Math.max(...proj);
+            const threshold = max * 0.05; 
+            let inGap = true;
+            let gapStart = 0;
+            const gaps: number[] = [];
+            for (let i = 0; i < len; i++) {
+              if (proj[i] > threshold) {
+                if (inGap) {
+                  if (gapStart > 0 && (i - gapStart > len * 0.01)) { 
+                     gaps.push((gapStart + i) / 2 / len);
+                  }
+                  inGap = false;
+                }
+              } else {
+                if (!inGap) {
+                  gapStart = i;
+                  inGap = true;
+                }
+              }
+            }
+            return gaps;
+          };
+
+          setAutoGrid({
+              h: findGaps(projY, height),
+              v: findGaps(projX, width)
+          });
       }
 
       const finalLabels = new Int32Array(width * height);
@@ -507,6 +552,16 @@ export default function App() {
     setStatus('idle');
   };
 
+  const handleOpenManual = () => {
+    if (autoGrid) {
+      setManualRows(Math.min(10, autoGrid.h.length + 1));
+      setManualCols(Math.min(10, autoGrid.v.length + 1));
+      setHLines(autoGrid.h.slice(0, 9));
+      setVLines(autoGrid.v.slice(0, 9));
+    }
+    setStatus('manual');
+  };
+
   return (
     <div className="min-h-screen bg-emerald-50 text-slate-900 font-sans flex flex-col overflow-hidden">
       {/* Header */}
@@ -622,7 +677,7 @@ export default function App() {
                       </button>
                     )}
                     <button
-                      onClick={() => setStatus('manual')}
+                      onClick={handleOpenManual}
                       className="text-slate-700 bg-white border-2 border-slate-200 px-5 py-2 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-slate-50 hover:border-slate-300 transition shadow-sm shrink-0"
                     >
                       <Settings className="w-4 h-4" />
@@ -735,7 +790,7 @@ export default function App() {
                                     <input 
                                         type="range" min="1" max="10" 
                                         value={manualCols} 
-                                        onChange={(e) => setManualCols(Number(e.target.value))}
+                                        onChange={(e) => handleColsChange(Number(e.target.value))}
                                         className="flex-1 accent-cyan-500"
                                     />
                                     <span className="w-8 text-center font-bold text-slate-700">{manualCols}</span>
@@ -747,7 +802,7 @@ export default function App() {
                                     <input 
                                         type="range" min="1" max="10" 
                                         value={manualRows} 
-                                        onChange={(e) => setManualRows(Number(e.target.value))}
+                                        onChange={(e) => handleRowsChange(Number(e.target.value))}
                                         className="flex-1 accent-cyan-500"
                                     />
                                     <span className="w-8 text-center font-bold text-slate-700">{manualRows}</span>
