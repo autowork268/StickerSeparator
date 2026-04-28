@@ -602,26 +602,8 @@ export default function App() {
 
     if (isMobileDevice()) {
       try {
-        const filesToShare = stickers.map((dataUrl, index) => {
-            const blob = dataURLtoBlob(dataUrl);
-            const filename = `sticker_${String(index + 1).padStart(2, '0')}.png`;
-            return new File([blob], filename, { type: 'image/png' });
-        });
-
-        if (navigator.share && navigator.canShare && navigator.canShare({ files: filesToShare })) {
-          try {
-            await navigator.share({
-              files: filesToShare,
-              title: 'Stickers',
-            });
-            return;
-          } catch(err: any) {
-            if (err.name === 'AbortError') return;
-            console.error('Share error:', err);
-          }
-        }
-        
-        // Fallback for mobile if sharing all files fail or is not available
+        // Lặp qua từng ảnh và trigger download thay vì dùng navigator.share cho mảng files
+        // vì iOS Share Sheet thường flatten PNG trong suốt thành JPEG nền trắng khi share nhiều ảnh.
         for (let i = 0; i < stickers.length; i++) {
           const blobUrl = URL.createObjectURL(dataURLtoBlob(stickers[i]));
           const a = document.createElement('a');
@@ -631,7 +613,7 @@ export default function App() {
           a.click();
           document.body.removeChild(a);
           setTimeout(() => URL.revokeObjectURL(blobUrl), 100);
-          await new Promise(r => setTimeout(r, 250)); // Small delay
+          await new Promise(r => setTimeout(r, 300)); // Small delay giữa các lần tải
         }
         return;
       } catch (e) {
