@@ -526,24 +526,90 @@ export default function App() {
     img.src = imageUrl;
   };
 
-  const handleDownload = (dataUrl: string, index: number) => {
-    const a = document.createElement('a');
-    a.href = dataUrl;
-    a.download = `sticker_${index + 1}.png`;
-    a.click();
+  const dataURLtoBlob = (dataurl: string) => {
+    const arr = dataurl.split(',');
+    const mimeMatch = arr[0].match(/:(.*?);/);
+    const mime = mimeMatch ? mimeMatch[1] : 'image/png';
+    const bstr = atob(arr[1]);
+    let n = bstr.length;
+    const u8arr = new Uint8Array(n);
+    while (n--) {
+      u8arr[n] = bstr.charCodeAt(n);
+    }
+    return new Blob([u8arr], { type: mime });
+  };
+
+  const isInAppBrowser = () => {
+    const ua = navigator.userAgent || navigator.vendor || (window as any).opera;
+    return (ua.indexOf("FBAN") > -1) || 
+           (ua.indexOf("FBAV") > -1) || 
+           (ua.indexOf("Line") > -1) || 
+           (ua.indexOf("Instagram") > -1) || 
+           (ua.indexOf("Zalo") > -1) ||
+           (ua.indexOf("TikTok") > -1);
+  };
+
+  const handleDownload = async (dataUrl: string, index: number) => {
+    const filename = `sticker_${String(index + 1).padStart(2, '0')}.png`;
+    try {
+      const blob = dataURLtoBlob(dataUrl);
+
+      if (navigator.share && navigator.canShare) {
+        const file = new File([blob], filename, { type: 'image/png' });
+        if (navigator.canShare({ files: [file] })) {
+          try {
+            await navigator.share({
+              files: [file],
+              title: filename,
+            });
+            return;
+          } catch(err: any) {
+            if (err.name === 'AbortError') return;
+          }
+        }
+      }
+
+      if (isInAppBrowser()) {
+        alert("Có vẻ bạn đang dùng trình duyệt nhúng. Hãy thử nhấn giữ vào ảnh để lưu, hoặc chọn 'Mở bằng Safari/Chrome / Trình duyệt hệ thống' từ menu phía trên bên phải để quá trình tải dễ dàng hơn.");
+        return;
+      }
+
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 100);
+    } catch (e) {
+      console.error('Download error:', e);
+      if (window.confirm("Không thể tải tự động. Bạn thử nhấn OK để xem toàn màn hình rồi nhấn giữ vào ảnh để lưu, hoặc đổi qua Safari/Chrome nhé.")) {
+         window.open(dataUrl, '_blank');
+      }
+    }
   };
 
   const handleDownloadAll = async () => {
-    const zip = new JSZip();
-    
-    stickers.forEach((stickerDataUrl, index) => {
-      // Extract base64 payload from data url
-      const base64Data = stickerDataUrl.split(',')[1];
-      zip.file(`sticker_${String(index + 1).padStart(2, '0')}.png`, base64Data, {base64: true});
-    });
+    if (isInAppBrowser()) {
+       alert("Thiết bị hoặc trình duyệt rút gọn này không hỗ trợ tải file ZIP. Vui lòng mở trang web bằng Safari/Chrome bằng cách bấm icon menu góc phải màn hình, hoặc bấm lưu từng ảnh riêng lẻ nhé.");
+       return;
+    }
 
-    const content = await zip.generateAsync({ type: 'blob' });
-    saveAs(content, 'stickers.zip');
+    try {
+      const zip = new JSZip();
+      
+      stickers.forEach((stickerDataUrl, index) => {
+        const base64Data = stickerDataUrl.split(',')[1];
+        zip.file(`sticker_${String(index + 1).padStart(2, '0')}.png`, base64Data, {base64: true});
+      });
+
+      const content = await zip.generateAsync({ type: 'blob' });
+      saveAs(content, 'stickers.zip');
+    } catch (e) {
+      console.error('Zip generation failed:', e);
+      alert("Hệ thống bị lỗi khi tạo file ZIP. Vui lòng thử mở trang web bằng Safari hoặc trình Chrome tải ứng dụng, hay bạn lưu thủ công từng ảnh trước nhé.");
+    }
   };
 
   const handleReset = () => {
