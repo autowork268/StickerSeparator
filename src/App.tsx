@@ -601,29 +601,14 @@ export default function App() {
     }
 
     if (isMobileDevice()) {
-      try {
-        // Lặp qua từng ảnh và trigger download thay vì dùng navigator.share cho mảng files
-        // vì iOS Share Sheet thường flatten PNG trong suốt thành JPEG nền trắng khi share nhiều ảnh.
-        for (let i = 0; i < stickers.length; i++) {
-          const blobUrl = URL.createObjectURL(dataURLtoBlob(stickers[i]));
-          const a = document.createElement('a');
-          a.href = blobUrl;
-          a.download = `sticker_${String(i + 1).padStart(2, '0')}.png`;
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-          setTimeout(() => URL.revokeObjectURL(blobUrl), 100);
-          await new Promise(r => setTimeout(r, 300)); // Small delay giữa các lần tải
+        const confirmMsg = "Vì giới hạn bảo mật của trình duyệt Web (Safari/Chrome trên điện thoại không giống app Zalo/Messenger), khi tải nhiều ảnh cùng lúc bằng nút Share sẽ làm ảnh bị mất viền trong suốt (thành nền trắng).\n\nĐể giữ nguyên viền trong suốt của tất cả sticker, hệ thống sẽ gom lại thành 1 file .ZIP. (Bạn có thể giải nén file .ZIP trong ứng dụng Tệp/Files của điện thoại). \n\nNhấn OK để tải ZIP, hoặc chọn Cancel để tự lưu thủ công từng ảnh ở ngoài.";
+        if (!window.confirm(confirmMsg)) {
+            return;
         }
-        return;
-      } catch (e) {
-         console.error('Mobile download failed:', e);
-         alert("Tải về thất bại. Vui lòng lưu thủ công từng ảnh.");
-         return;
-      }
     }
 
     try {
+      setStatus('processing');
       const zip = new JSZip();
       
       stickers.forEach((stickerDataUrl, index) => {
@@ -633,9 +618,11 @@ export default function App() {
 
       const content = await zip.generateAsync({ type: 'blob' });
       saveAs(content, 'stickers.zip');
+      setStatus('done');
     } catch (e) {
       console.error('Zip generation failed:', e);
       alert("Hệ thống bị lỗi khi tạo file ZIP. Vui lòng thử mở trang web bằng Safari hoặc trình Chrome tải ứng dụng, hay bạn lưu thủ công từng ảnh trước nhé.");
+      setStatus('done');
     }
   };
 
