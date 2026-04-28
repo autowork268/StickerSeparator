@@ -4,8 +4,10 @@
  */
 
 import React, { useState, useRef, useCallback } from 'react';
-import { Upload, Image as ImageIcon, Download, Scissors, Loader2, Trash2 } from 'lucide-react';
+import { Upload, Image as ImageIcon, Download, Scissors, Loader2, Trash2, ArchiveRestore } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import JSZip from 'jszip';
+import { saveAs } from 'file-saver';
 
 export default function App() {
   const [status, setStatus] = useState<'idle' | 'processing' | 'done'>('idle');
@@ -408,6 +410,19 @@ export default function App() {
     a.click();
   };
 
+  const handleDownloadAll = async () => {
+    const zip = new JSZip();
+    
+    stickers.forEach((stickerDataUrl, index) => {
+      // Extract base64 payload from data url
+      const base64Data = stickerDataUrl.split(',')[1];
+      zip.file(`sticker_${String(index + 1).padStart(2, '0')}.png`, base64Data, {base64: true});
+    });
+
+    const content = await zip.generateAsync({ type: 'blob' });
+    saveAs(content, 'stickers.zip');
+  };
+
   const handleReset = () => {
     setOriginalImage(null);
     setStickers([]);
@@ -518,13 +533,24 @@ export default function App() {
                     <span className="w-6 h-6 bg-indigo-500 rounded-full inline-flex items-center justify-center text-xs text-white">2</span>
                     Đã Tách Được ({stickers.length})
                   </h2>
-                  <button
-                    onClick={handleReset}
-                    className="text-white bg-slate-800 border-2 border-slate-800 px-5 py-2 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-slate-700 hover:border-slate-700 transition shadow-lg shrink-0"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                    Bắt đầu lại
-                  </button>
+                  <div className="flex gap-2">
+                    {stickers.length > 0 && (
+                      <button
+                        onClick={handleDownloadAll}
+                        className="text-white bg-indigo-600 border-2 border-indigo-600 px-5 py-2 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-indigo-700 hover:border-indigo-700 transition shadow-lg shrink-0"
+                      >
+                        <ArchiveRestore className="w-4 h-4" />
+                        Tải tất cả
+                      </button>
+                    )}
+                    <button
+                      onClick={handleReset}
+                      className="text-white bg-slate-800 border-2 border-slate-800 px-5 py-2 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-slate-700 hover:border-slate-700 transition shadow-lg shrink-0"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      Bắt đầu lại
+                    </button>
+                  </div>
                 </div>
 
                 {stickers.length === 0 ? (
