@@ -606,7 +606,7 @@ export default function App() {
                 animate={{ opacity: 1, y: 0 }}
                 className="w-full bg-white rounded-3xl p-6 md:p-8 shadow-xl border-2 border-slate-100 flex flex-col"
               >
-                <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-8">
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-4">
                   <h2 className="text-xl font-bold flex items-center gap-2">
                     <span className="w-6 h-6 bg-indigo-500 rounded-full inline-flex items-center justify-center text-xs text-white">2</span>
                     Đã Tách Được ({stickers.length})
@@ -636,6 +636,13 @@ export default function App() {
                       Bắt đầu lại
                     </button>
                   </div>
+                </div>
+
+                <div className="bg-indigo-50 text-indigo-700 p-4 rounded-xl border border-indigo-100 mb-8 flex items-start gap-3 text-sm font-medium">
+                  <Settings className="w-5 h-5 shrink-0 mt-0.5" />
+                  <p>
+                    Kết quả tách tự động không như ý muốn vì ảnh có cấu trúc phức tạp hay dính vào nhau? Hãy chuyển sang <strong>Xử lý thủ công</strong> để cắt lưới chính xác theo ý bạn.
+                  </p>
                 </div>
 
                 {stickers.length === 0 ? (
