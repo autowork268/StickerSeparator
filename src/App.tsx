@@ -590,10 +590,55 @@ export default function App() {
     }
   };
 
+  const isMobileDevice = () => {
+    return /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || window.innerWidth < 768;
+  };
+
   const handleDownloadAll = async () => {
     if (isInAppBrowser()) {
-       alert("Thiết bị hoặc trình duyệt rút gọn này không hỗ trợ tải file ZIP. Vui lòng mở trang web bằng Safari/Chrome bằng cách bấm icon menu góc phải màn hình, hoặc bấm lưu từng ảnh riêng lẻ nhé.");
+       alert("Thiết bị hoặc trình duyệt rút gọn này không hỗ trợ tải file. Vui lòng mở trang web bằng Safari/Chrome bằng cách bấm icon menu góc phải màn hình, hoặc bấm lưu từng ảnh riêng lẻ nhé.");
        return;
+    }
+
+    if (isMobileDevice()) {
+      try {
+        const filesToShare = stickers.map((dataUrl, index) => {
+            const blob = dataURLtoBlob(dataUrl);
+            const filename = `sticker_${String(index + 1).padStart(2, '0')}.png`;
+            return new File([blob], filename, { type: 'image/png' });
+        });
+
+        if (navigator.share && navigator.canShare && navigator.canShare({ files: filesToShare })) {
+          try {
+            await navigator.share({
+              files: filesToShare,
+              title: 'Stickers',
+            });
+            return;
+          } catch(err: any) {
+            if (err.name === 'AbortError') return;
+            console.error('Share error:', err);
+          }
+        }
+        
+        // Fallback for mobile if sharing all files fail or is not available
+        for (let i = 0; i < stickers.length; i++) {
+          const blobUrl = URL.createObjectURL(dataURLtoBlob(stickers[i]));
+          const a = document.createElement('a');
+          a.href = blobUrl;
+          a.download = `sticker_${String(i + 1).padStart(2, '0')}.png`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          setTimeout(() => URL.revokeObjectURL(blobUrl), 100);
+          await new Promise(r => setTimeout(r, 250)); // Small delay
+        }
+        return;
+      } catch (e) {
+         console.error('Mobile download failed:', e);
+         alert("Tải về thất bại. Vui lòng lưu thủ công từng ảnh.");
+         return;
+      }
     }
 
     try {
@@ -727,12 +772,12 @@ export default function App() {
                 animate={{ opacity: 1, y: 0 }}
                 className="w-full bg-white rounded-3xl p-6 md:p-8 shadow-xl border-2 border-slate-100 flex flex-col"
               >
-                <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-4">
+                <div className="flex flex-col md:flex-row items-center justify-between gap-4 mb-4">
                   <h2 className="text-xl font-bold flex items-center gap-2">
                     <span className="w-6 h-6 bg-indigo-500 rounded-full inline-flex items-center justify-center text-xs text-white">2</span>
                     Đã Tách Được ({stickers.length})
                   </h2>
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap items-center justify-center gap-2">
                     {stickers.length > 0 && (
                       <button
                         onClick={handleDownloadAll}
@@ -815,14 +860,14 @@ export default function App() {
                 animate={{ opacity: 1, y: 0 }}
                 className="w-full max-w-5xl bg-white rounded-3xl p-6 md:p-8 shadow-xl border-2 border-slate-100 flex flex-col"
               >
-                <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-8">
-                  <h2 className="text-xl font-bold flex items-center gap-2">
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-4 md:mb-8">
+                  <h2 className="text-xl font-bold flex items-center gap-2 text-center sm:text-left">
                     <span className="w-6 h-6 bg-cyan-500 rounded-full inline-flex items-center justify-center text-xs text-white">
                       <Settings className="w-3.5 h-3.5" />
                     </span>
                     Xử Lý Viền Tự Chọn
                   </h2>
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap items-center justify-center gap-2">
                     <button
                       onClick={() => {
                         setStatus('processing');
