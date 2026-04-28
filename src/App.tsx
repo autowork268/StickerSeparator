@@ -3,17 +3,69 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useRef, useCallback } from 'react';
-import { Upload, Image as ImageIcon, Download, Scissors, Loader2, Trash2, ArchiveRestore } from 'lucide-react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { Upload, Image as ImageIcon, Download, Scissors, Loader2, Trash2, ArchiveRestore, Settings, Grid3X3, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
 
 export default function App() {
-  const [status, setStatus] = useState<'idle' | 'processing' | 'done'>('idle');
+  const [status, setStatus] = useState<'idle' | 'processing' | 'done' | 'manual'>('idle');
   const [originalImage, setOriginalImage] = useState<string | null>(null);
   const [stickers, setStickers] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const imgRef = useRef<HTMLImageElement>(null);
+
+  const [manualRows, setManualRows] = useState(2);
+  const [manualCols, setManualCols] = useState(2);
+  const [hLines, setHLines] = useState<number[]>([0.5]);
+  const [vLines, setVLines] = useState<number[]>([0.5]);
+  const [draggingLine, setDraggingLine] = useState<{type: 'h'|'v', index: number} | null>(null);
+
+  useEffect(() => {
+    setHLines(Array.from({ length: Math.max(1, manualRows) - 1 }, (_, i) => (i + 1) / manualRows));
+  }, [manualRows]);
+
+  useEffect(() => {
+    setVLines(Array.from({ length: Math.max(1, manualCols) - 1 }, (_, i) => (i + 1) / manualCols));
+  }, [manualCols]);
+
+  const handleManualMouseMove = useCallback((e: MouseEvent) => {
+    if (!draggingLine || !imgRef.current) return;
+    const rect = imgRef.current.getBoundingClientRect();
+    if (draggingLine.type === 'h') {
+        let y = (e.clientY - rect.top) / rect.height;
+        y = Math.max(0.01, Math.min(0.99, y));
+        setHLines(prev => {
+            const next = [...prev];
+            next[draggingLine.index] = y;
+            return next;
+        });
+    } else {
+        let x = (e.clientX - rect.left) / rect.width;
+        x = Math.max(0.01, Math.min(0.99, x));
+        setVLines(prev => {
+            const next = [...prev];
+            next[draggingLine.index] = x;
+            return next;
+        });
+    }
+  }, [draggingLine]);
+
+  const handleManualMouseUp = useCallback(() => {
+    setDraggingLine(null);
+  }, []);
+
+  useEffect(() => {
+    if (draggingLine) {
+        window.addEventListener('mousemove', handleManualMouseMove);
+        window.addEventListener('mouseup', handleManualMouseUp);
+        return () => {
+            window.removeEventListener('mousemove', handleManualMouseMove);
+            window.removeEventListener('mouseup', handleManualMouseUp);
+        };
+    }
+  }, [draggingLine, handleManualMouseMove, handleManualMouseUp]);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -44,7 +96,7 @@ export default function App() {
     reader.readAsDataURL(file);
   };
 
-  const segmentStickers = (imageUrl: string) => {
+  const segmentStickers = (imageUrl: string, manualConfig?: { h: number[]; v: number[] }) => {
     const img = new Image();
     img.onload = () => {
       const canvas = document.createElement('canvas');
@@ -161,13 +213,36 @@ export default function App() {
       // 1.7 Commit the transparent and softened pixels to the main canvas
       ctx.putImageData(imgData, 0, 0);
 
-      // --- 2. MORPHOLOGICAL EROSION & WATERSHED ---
+      // --- 2. REGION LABELING ---
       const M = new Uint8Array(width * height);
       for (let i = 0; i < width * height; i++) {
         if (data[i * 4 + 3] > 10) M[i] = 1;
       }
 
-      const getCores = (R: number) => {
+      const finalLabels = new Int32Array(width * height);
+
+      if (manualConfig) {
+        // Manual mode: labels are assigned by grid cell
+        const sortedH = [0, ...[...manualConfig.h].sort((a,b)=>a-b), 1];
+        const sortedV = [0, ...[...manualConfig.v].sort((a,b)=>a-b), 1];
+        
+        for (let y = 0; y < height; y++) {
+          for (let x = 0; x < width; x++) {
+             const idx = y * width + x;
+             if (M[idx] === 1) { 
+                 const yPct = y / height;
+                 const xPct = x / width;
+                 let r = 0, c = 0;
+                 while (r < sortedH.length - 1 && yPct > sortedH[r+1]) r++;
+                 while (c < sortedV.length - 1 && xPct > sortedV[c+1]) c++;
+                 
+                 finalLabels[idx] = r * (sortedV.length - 1) + c + 1;
+             }
+          }
+        }
+      } else {
+        // Auto mode: Morphological Erosion & Watershed
+        const getCores = (R: number) => {
           const E = new Uint8Array(width * height);
           if (R === 0) {
               for (let i = 0; i < width * height; i++) E[i] = M[i];
@@ -265,7 +340,6 @@ export default function App() {
           activeCores = res.activeCores;
       }
 
-      const finalLabels = new Int32Array(width * height);
       const queue = new Int32Array(width * height);
       let qHead = 0, qTail = 0;
 
@@ -299,6 +373,7 @@ export default function App() {
               queue[qTail++] = idx + width;
           }
       }
+      } // end else (auto mode)
 
       const bounds = new Map<number, {minX: number, maxX: number, minY: number, maxY: number, pixels: number}>();
       for (let y = 0; y < height; y++) {
@@ -330,7 +405,10 @@ export default function App() {
           const w = b.maxX - b.minX;
           const h = b.maxY - b.minY;
           
-          if (w > 40 && h > 40 && b.pixels > 300) {
+          const sizeLimit = manualConfig ? 5 : 40;
+          const pixelLimit = manualConfig ? 20 : 300;
+
+          if (w > sizeLimit && h > sizeLimit && b.pixels > pixelLimit) {
               const sMinX = Math.max(0, b.minX - padding);
               const sMinY = Math.max(0, b.minY - padding);
               const sMaxX = Math.min(width, b.maxX + padding);
@@ -544,6 +622,13 @@ export default function App() {
                       </button>
                     )}
                     <button
+                      onClick={() => setStatus('manual')}
+                      className="text-slate-700 bg-white border-2 border-slate-200 px-5 py-2 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-slate-50 hover:border-slate-300 transition shadow-sm shrink-0"
+                    >
+                      <Settings className="w-4 h-4" />
+                      Xử lý thủ công
+                    </button>
+                    <button
                       onClick={handleReset}
                       className="text-white bg-slate-800 border-2 border-slate-800 px-5 py-2 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-slate-700 hover:border-slate-700 transition shadow-lg shrink-0"
                     >
@@ -595,6 +680,111 @@ export default function App() {
                 )}
               </motion.div>
             )}
+            {status === 'manual' && originalImage && (
+              <motion.div
+                key="manual"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="w-full max-w-5xl bg-white rounded-3xl p-6 md:p-8 shadow-xl border-2 border-slate-100 flex flex-col"
+              >
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-8">
+                  <h2 className="text-xl font-bold flex items-center gap-2">
+                    <span className="w-6 h-6 bg-cyan-500 rounded-full inline-flex items-center justify-center text-xs text-white">
+                      <Settings className="w-3.5 h-3.5" />
+                    </span>
+                    Xử Lý Viền Tự Chọn
+                  </h2>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => {
+                        setStatus('processing');
+                        setTimeout(() => segmentStickers(originalImage, { h: hLines, v: vLines }), 50);
+                      }}
+                      className="text-white bg-cyan-600 border-2 border-cyan-600 px-5 py-2 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-cyan-700 hover:border-cyan-700 transition shadow-lg shrink-0"
+                    >
+                      <Check className="w-4 h-4" />
+                      Xác Nhận Cắt
+                    </button>
+                    <button
+                      onClick={() => setStatus('done')}
+                      className="text-white bg-slate-800 border-2 border-slate-800 px-5 py-2 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-slate-700 hover:border-slate-700 transition shadow-lg shrink-0"
+                    >
+                      Hủy
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex flex-col md:flex-row gap-8">
+                  <div className="w-full md:w-64 shrink-0 flex flex-col gap-6">
+                    <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 shadow-sm">
+                        <p className="text-sm text-slate-500 mb-4">
+                            Chọn số lượng hàng và cột phân chia các sticker. Bạn có thể kéo trực tiếp các đường cắt trên hình để chọn ranh giới chính xác nhất.
+                        </p>
+                        
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-xs font-bold text-slate-600 mb-1">Cột (Dọc)</label>
+                                <div className="flex items-center gap-3">
+                                    <input 
+                                        type="range" min="1" max="10" 
+                                        value={manualCols} 
+                                        onChange={(e) => setManualCols(Number(e.target.value))}
+                                        className="flex-1 accent-cyan-500"
+                                    />
+                                    <span className="w-8 text-center font-bold text-slate-700">{manualCols}</span>
+                                </div>
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-slate-600 mb-1">Hàng (Ngang)</label>
+                                <div className="flex items-center gap-3">
+                                    <input 
+                                        type="range" min="1" max="10" 
+                                        value={manualRows} 
+                                        onChange={(e) => setManualRows(Number(e.target.value))}
+                                        className="flex-1 accent-cyan-500"
+                                    />
+                                    <span className="w-8 text-center font-bold text-slate-700">{manualRows}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                  </div>
+
+                  <div className="flex-1 bg-slate-100 rounded-2xl overflow-hidden border-2 border-slate-200 relative select-none">
+                     <img 
+                        ref={imgRef}
+                        src={originalImage} 
+                        className="w-full h-auto object-contain pointer-events-none" 
+                        alt="Workspace" 
+                     />
+                     <div className="absolute inset-0 z-10 overflow-hidden">
+                        {hLines.map((y, idx) => (
+                           <div 
+                              key={`h-${idx}`}
+                              onMouseDown={() => setDraggingLine({ type: 'h', index: idx })}
+                              style={{ top: `${y * 100}%` }}
+                              className="absolute left-0 right-0 h-4 -mt-2 cursor-row-resize flex items-center justify-center group"
+                           >
+                               <div className="w-full h-0.5 bg-cyan-400 group-hover:bg-cyan-500 group-hover:h-1 transition-all shadow-sm" />
+                           </div>
+                        ))}
+                        {vLines.map((x, idx) => (
+                           <div 
+                              key={`v-${idx}`}
+                              onMouseDown={() => setDraggingLine({ type: 'v', index: idx })}
+                              style={{ left: `${x * 100}%` }}
+                              className="absolute top-0 bottom-0 w-4 -ml-2 cursor-col-resize flex items-center justify-center group"
+                           >
+                               <div className="h-full w-0.5 bg-cyan-400 group-hover:bg-cyan-500 group-hover:w-1 transition-all shadow-sm" />
+                           </div>
+                        ))}
+                     </div>
+                  </div>
+                </div>
+
+              </motion.div>
+            )}
+
           </AnimatePresence>
         </div>
       </main>
