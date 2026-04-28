@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { Upload, Image as ImageIcon, Download, Scissors, Loader2, Trash2, ArchiveRestore, Settings, Grid3X3, Check } from 'lucide-react';
+import { Upload, Image as ImageIcon, Download, Scissors, Loader2, Trash2, ArchiveRestore, Settings, Grid3X3, Check, Heart, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
@@ -22,6 +22,7 @@ export default function App() {
   const [vLines, setVLines] = useState<number[]>([0.5]);
   const [draggingLine, setDraggingLine] = useState<{type: 'h'|'v', index: number} | null>(null);
   const [autoGrid, setAutoGrid] = useState<{h: number[], v: number[]} | null>(null);
+  const [isDonateOpen, setIsDonateOpen] = useState(false);
 
   const handleRowsChange = (val: number) => {
       setManualRows(val);
@@ -943,6 +944,74 @@ export default function App() {
           <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
         </div>
       </footer>
+
+      {/* Donate Floating Button */}
+      <button
+        onClick={() => setIsDonateOpen(true)}
+        className="fixed bottom-14 right-4 sm:right-6 bg-rose-500 text-white p-3.5 sm:p-4 rounded-full shadow-lg hover:shadow-xl hover:scale-105 active:scale-95 transition-all z-40 group flex flex-col items-center justify-center border-4 border-emerald-50"
+      >
+        <Heart className="w-6 h-6 fill-rose-500 group-hover:fill-white text-rose-50 transition-colors animate-pulse" />
+      </button>
+
+      {/* Donate Modal */}
+      <AnimatePresence>
+        {isDonateOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
+            onClick={() => setIsDonateOpen(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden flex flex-col"
+            >
+              <div className="bg-rose-50 p-6 text-center relative border-b border-rose-100">
+                <button
+                  onClick={() => setIsDonateOpen(false)}
+                  className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full bg-white text-slate-400 hover:text-slate-700 hover:bg-rose-100 transition-colors shadow-sm"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+                <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center shadow-md mx-auto mb-3">
+                  <Heart className="w-8 h-8 text-rose-500 fill-rose-500" />
+                </div>
+                <h3 className="text-xl font-bold text-slate-800 tracking-tight">Ủng Hộ Tác Giả</h3>
+                <p className="text-sm text-slate-500 mt-2 font-medium">
+                  Nếu bạn thấy công cụ này hữu ích và giúp tiết kiệm thời gian, một ly cà phê ủng hộ sẽ tiếp thêm động lực cho mình làm app xịn hơn nữa. <br/>Cám ơn mọi người ❤️
+                </p>
+              </div>
+              
+              <div className="p-6 flex flex-col items-center gap-4 bg-white">
+                <img 
+                  src="https://res.cloudinary.com/dtqlhleqr/image/upload/v1777392721/IMG_4805_hgi4a8.jpg" 
+                  alt="QR Code VIB LÊ PHƯỚC" 
+                  className="w-56 h-auto object-contain rounded-2xl shadow-sm border border-slate-100"
+                />
+                
+                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 w-full text-sm">
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="text-slate-500">Ngân hàng:</span>
+                    <span className="font-bold text-slate-700">VIB</span>
+                  </div>
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="text-slate-500">Chủ tài khoản:</span>
+                    <span className="font-bold text-slate-700 uppercase">Le Phuoc</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-500">Số tài khoản:</span>
+                    <span className="font-bold text-indigo-600 font-mono text-base tracking-wide">010406529</span>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
