@@ -23,6 +23,7 @@ export default function App() {
   const [draggingLine, setDraggingLine] = useState<{type: 'h'|'v', index: number} | null>(null);
   const [autoGrid, setAutoGrid] = useState<{h: number[], v: number[]} | null>(null);
   const [isDonateOpen, setIsDonateOpen] = useState(false);
+  const [bgSelection, setBgSelection] = useState<'transparent' | 'white'>('transparent');
 
   const handleRowsChange = (val: number) => {
       setManualRows(val);
@@ -527,6 +528,28 @@ export default function App() {
     img.src = imageUrl;
   };
 
+  const applyBackground = (dataUrl: string, bg: 'transparent' | 'white'): Promise<string> => {
+    if (bg === 'transparent') return Promise.resolve(dataUrl);
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(img, 0, 0);
+          resolve(canvas.toDataURL('image/png'));
+        } else {
+          resolve(dataUrl);
+        }
+      };
+      img.src = dataUrl;
+    });
+  };
+
   const dataURLtoBlob = (dataurl: string) => {
     const arr = dataurl.split(',');
     const mimeMatch = arr[0].match(/:(.*?);/);
@@ -553,7 +576,8 @@ export default function App() {
   const handleDownload = async (dataUrl: string, index: number) => {
     const filename = `sticker_${String(index + 1).padStart(2, '0')}.png`;
     try {
-      const blob = dataURLtoBlob(dataUrl);
+      const finalDataUrl = await applyBackground(dataUrl, bgSelection);
+      const blob = dataURLtoBlob(finalDataUrl);
 
       if (navigator.share && navigator.canShare) {
         const file = new File([blob], filename, { type: 'image/png' });
@@ -586,7 +610,8 @@ export default function App() {
     } catch (e) {
       console.error('Download error:', e);
       if (window.confirm("Không thể tải tự động. Bạn thử nhấn OK để xem toàn màn hình rồi nhấn giữ vào ảnh để lưu, hoặc đổi qua Safari/Chrome nhé.")) {
-         window.open(dataUrl, '_blank');
+         const finalDataUrl = await applyBackground(dataUrl, bgSelection);
+         window.open(finalDataUrl, '_blank');
       }
     }
   };
@@ -612,10 +637,11 @@ export default function App() {
       setStatus('processing');
       const zip = new JSZip();
       
-      stickers.forEach((stickerDataUrl, index) => {
-        const base64Data = stickerDataUrl.split(',')[1];
-        zip.file(`sticker_${String(index + 1).padStart(2, '0')}.png`, base64Data, {base64: true});
-      });
+      for (let i = 0; i < stickers.length; i++) {
+        const finalDataUrl = await applyBackground(stickers[i], bgSelection);
+        const base64Data = finalDataUrl.split(',')[1];
+        zip.file(`sticker_${String(i + 1).padStart(2, '0')}.png`, base64Data, {base64: true});
+      }
 
       const content = await zip.generateAsync({ type: 'blob' });
       saveAs(content, 'stickers.zip');
@@ -749,9 +775,25 @@ export default function App() {
                   </h2>
                   <div className="flex flex-wrap items-center justify-center gap-2">
                     {stickers.length > 0 && (
+                      <div className="flex items-center bg-slate-100 p-1 rounded-xl mr-0 sm:mr-2">
+                        <button 
+                          onClick={() => setBgSelection('transparent')}
+                          className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${bgSelection === 'transparent' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                        >
+                          Trong suốt
+                        </button>
+                        <button 
+                          onClick={() => setBgSelection('white')}
+                          className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${bgSelection === 'white' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                        >
+                          Nền trắng
+                        </button>
+                      </div>
+                    )}
+                    {stickers.length > 0 && (
                       <button
                         onClick={handleDownloadAll}
-                        className="text-white bg-indigo-600 border-2 border-indigo-600 px-5 py-2 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-indigo-700 hover:border-indigo-700 transition shadow-lg shrink-0"
+                        className="text-white bg-indigo-600 border-2 border-indigo-600 px-4 sm:px-5 py-2 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-indigo-700 hover:border-indigo-700 transition shadow-lg shrink-0"
                       >
                         <ArchiveRestore className="w-4 h-4" />
                         Tải tất cả
@@ -798,7 +840,7 @@ export default function App() {
                         className="group relative flex flex-col items-center bg-slate-50 rounded-2xl p-4 border border-slate-100 hover:border-indigo-200 transition-colors"
                       >
                         {/* Checkered background wrapper */}
-                        <div className="w-full aspect-square bg-[radial-gradient(#cbd5e1_1px,transparent_1px)] [background-size:10px_10px] rounded-xl flex items-center justify-center shadow-inner mb-3 overflow-hidden relative border border-slate-100">
+                        <div className={`w-full aspect-square ${bgSelection === 'white' ? 'bg-white' : 'bg-[radial-gradient(#cbd5e1_1px,transparent_1px)] [background-size:10px_10px]'} rounded-xl flex items-center justify-center shadow-inner mb-3 overflow-hidden relative border border-slate-100 transition-colors duration-300`}>
                           <img 
                             src={sticker} 
                             alt={`Sticker ${idx + 1}`} 
